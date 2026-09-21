@@ -78,6 +78,7 @@ The script automatically:
 4. Configures a **Release** build with CMake. CMake downloads the Chromium Embedded Framework (CEF) files required by the renderer.
 5. Builds `linux-wallpaperengine` and the bundled KDE integration files using two parallel jobs by default.
 6. Checks that the built executable starts, then creates **`/usr/local/bin/linux-wallpaperengine`** as a symlink to **`build/output/linux-wallpaperengine`** in this checkout.
+7. In a logged-in KDE Wayland session with systemd user services and `kscreen-doctor`, installs and enables automatic wallpaper restoration for your user.
 
 It requests `sudo` only for package installation or a command-link directory that your user cannot write to. Confirm the package manager's transaction when prompted, or pass `--yes` to accept those confirmations automatically. The compilation itself runs without root privileges.
 
@@ -103,6 +104,7 @@ Useful options:
 ./build.sh --jobs 4                   # Choose the number of parallel build jobs
 ./build.sh --skip-deps                # Use already installed dependencies
 ./build.sh --no-link                  # Build without creating a command symlink
+./build.sh --no-autostart             # Skip wallpaper autostart setup
 ./build.sh --bin-dir "$HOME/.local/bin" # Use a user-owned command directory
 ./build.sh --help
 ```
@@ -125,7 +127,7 @@ Replace `DESKTOP_ID` below with that numeric ID:
 python3 build/output/kde/install.py --desktop DESKTOP_ID --mouse-interaction on
 ```
 
-This installs the KDE packages, enables the KWin script, selects the integration wallpaper type for that desktop, and enables mouse forwarding. The selected type is shown as **Linux Wallpaper Engine (Desktop Integration)** in Plasma's wallpaper settings.
+This installs the KDE packages, enables the KWin script, selects the integration wallpaper type for that desktop, enables mouse forwarding, and sets up wallpaper autostart when the session supports it. The selected type is shown as **Linux Wallpaper Engine (Desktop Integration)** in Plasma's wallpaper settings.
 
 Repeat for any additional screens, then restart Plasma **once**, or log out and back in:
 
@@ -142,6 +144,36 @@ Start a wallpaper normally, substituting your output name and wallpaper director
 ```
 
 If you use a separate graphical frontend, point it at this fork's executable. The frontend itself is not modified or bundled here.
+
+## Restore wallpapers automatically at login
+
+Both `./build.sh` and the KDE integration installer set up **`linux-wallpaperengine-restore.service`** for the current user when run in a KDE Wayland session with a systemd user manager and `kscreen-doctor`. It starts after Plasma at each login. In other environments, the build still completes and reports why autostart setup was skipped.
+
+Select your wallpapers once through your usual frontend. The service remembers the actual renderer commands per screen, including wallpaper paths, scaling, audio, mouse settings and custom properties. It restores the last selection at the next login and skips screens that already have a wallpaper process. First-time installation with no running wallpapers starts tracking and learns the next selection.
+
+**Tracking is event-driven, with no periodic process scanning.** Linux filesystem notifications report changes to the Linux Wallpaper Engine frontend's saved settings and to Plasma's desktop configuration. After a short debounce, the tracker checks the running wallpaper commands and writes its state only if they changed. Unrelated configuration events do not trigger a process scan. A final snapshot is taken when the service stops during logout or shutdown; renderer children remain available until that snapshot finishes.
+
+The only timed retries happen during the initial login restoration: the service waits up to 90 seconds for saved screens and tries a failed launch at most three times. After that, it sleeps until a relevant configuration event or a shutdown signal. A manually stopped wallpaper stays stopped for the rest of that session, but its last selection remains available for the next login.
+
+Saved selections are stored in `~/.local/state/linux-wallpaperengine/last-wallpapers.json` (or under `$XDG_STATE_HOME`). Reinstalling preserves them and does not restart an already running service, so its wallpapers are not interrupted. Updated tracker code takes effect at the next login. Custom build directories and `--no-link` are supported: the service uses the executable path supplied by the build script.
+
+To install or update autostart separately from a logged-in desktop session:
+
+```sh
+python3 kde/autostart/install.py --binary "$PWD/build/output/linux-wallpaperengine"
+```
+
+To inspect or disable it:
+
+```sh
+systemctl --user status linux-wallpaperengine-restore.service
+journalctl --user -u linux-wallpaperengine-restore.service
+systemctl --user disable --now linux-wallpaperengine-restore.service
+```
+
+Stopping the service also stops wallpaper processes that it launched; frontend-owned processes are unaffected. Enable it again with `systemctl --user enable --now linux-wallpaperengine-restore.service`.
+
+Use `--no-autostart` with `build.sh` or `kde/install.py` to skip setup. This flag does not disable an existing service. The tracker observes the **Linux Wallpaper Engine** frontend's configuration and Plasma integration changes; unrelated frontends that change a renderer in place without either notification are only captured at the final shutdown snapshot.
 
 ## Behavior and limitations
 
@@ -172,7 +204,8 @@ The original wallpaper plugin and its retained settings will be selected again. 
 | Mouse input | Receive copied pointer movement and button states over D-Bus, convert coordinates, preserve short clicks, and release stale button states. |
 | Installer | Install user-local packages, enable the KWin script, preserve previous wallpaper settings, toggle mouse forwarding, and support restoration. |
 | CMake | Copy integration assets into the build output, including subsequent updates. |
-| Build script | Detect the distribution, install missing dependencies, initialize submodules, build, check executable startup, and create the command symlink. |
+| Build script | Detect the distribution, install missing dependencies, initialize submodules, build, check executable startup, create the command symlink, and install supported KDE autostart. |
+| Autostart service | Restore saved wallpapers per screen, observe configuration changes without polling, and save a final snapshot at logout/shutdown. |
 | Regression tests | Cover stacking, screen matching, renderer lifecycle, passive desktop input, D-Bus transport, short clicks, and timeout releases. |
 
 ## Upstream and license

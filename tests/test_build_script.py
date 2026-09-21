@@ -110,6 +110,8 @@ class BuildScriptTests(unittest.TestCase):
         repo = self.work / "source with spaces"
         repo.mkdir()
         shutil.copy2(SCRIPT, repo / "build.sh")
+        shutil.copytree(ROOT / "kde/autostart", repo / "kde/autostart")
+        self.env["XDG_CURRENT_DESKTOP"] = ""
         dest = self.work / "bin"
         dest.mkdir()
         link = dest / "linux-wallpaperengine"
@@ -137,6 +139,7 @@ fi''')
         result = subprocess.run(args, env=self.env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(link.resolve(), repo / "build/output/linux-wallpaperengine")
+        self.assertIn("Autostart setup skipped", result.stdout)
         commands = self.log.read_text()
         self.assertIn("submodule update --init --recursive", commands)
         self.assertIn("-DCMAKE_BUILD_TYPE=Release", commands)

@@ -31,6 +31,7 @@ executable in this checkout's build/output directory. Run as your normal user.
   --yes              Accept package-manager confirmations (including Arch upgrades)
   --skip-deps        Use an already prepared toolchain; skip package installation
   --no-link          Build without installing the command symlink
+  --no-autostart     Skip the per-user KDE wallpaper autostart installation
   -h, --help         Show this help
 
 sudo is requested only when needed. Package managers keep their confirmation
@@ -221,7 +222,7 @@ install_link() {
 }
 
 main() {
-    dry_run=0; skip_deps=0; no_link=0; assume_yes=0; jobs=2; manager=none
+    dry_run=0; skip_deps=0; no_link=0; no_autostart=0; assume_yes=0; jobs=2; manager=none
     local repo
     repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
     build_dir=$repo/build
@@ -232,6 +233,7 @@ main() {
             --yes) assume_yes=1;;
             --skip-deps) skip_deps=1;;
             --no-link) no_link=1;;
+            --no-autostart) no_autostart=1;;
             --jobs|--build-dir|--bin-dir)
                 (( $# >= 2 )) && [[ -n $2 && $2 != --* ]] || die "Missing value for $1"
                 case "$1" in --jobs) jobs=$2;; --build-dir) build_dir=$2;; --bin-dir) bin_dir=$2;; esac
@@ -260,6 +262,9 @@ main() {
         "$build_dir/output/linux-wallpaperengine" --help >/dev/null
     fi
     install_link
+    if (( ! no_autostart )); then
+        run python3 "$repo/kde/autostart/install.py" --binary "$build_dir/output/linux-wallpaperengine" --if-supported
+    fi
     if (( dry_run )); then say 'Dry run complete. No packages, files or desktop settings were changed.'
     else
         say "Build ready: $build_dir/output/linux-wallpaperengine"

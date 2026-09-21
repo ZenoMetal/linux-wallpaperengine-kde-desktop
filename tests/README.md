@@ -3,7 +3,7 @@
 Run as an ordinary user:
 
 ```sh
-python3 tests/test_build_script.py
+python3 -m unittest discover -s tests -p 'test_*.py' -v
 bash -n build.sh
 ./build.sh --dry-run
 ```
@@ -25,3 +25,9 @@ is documented by [DNF5](https://dnf5.readthedocs.io/en/latest/commands/install.8
 [pacman](https://man.archlinux.org/man/pacman.8.en),
 [zypper](https://doc.opensuse.org/documentation/tumbleweed/zypper/) and
 [XBPS](https://man.voidlinux.org/xbps-install).
+
+Autostart tests also exercise real inotify notifications in an isolated temporary
+configuration directory: idle operation causes no process scans or state writes,
+atomic config replacement triggers capture, unchanged selections are not
+rewritten, and SIGTERM saves the final selection. Renderer processes and
+systemd operations are mocked; tests do not change the user's running desktop.

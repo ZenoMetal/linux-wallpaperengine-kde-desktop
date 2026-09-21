@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 PLUGIN = "io.github.linuxwallpaperengine.desktop"
 KWIN = "linux-wallpaperengine-desktop"
@@ -21,6 +22,7 @@ def main():
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--restore", action="store_true", help="Restore the saved wallpaper type")
     parser.add_argument("--mouse-interaction", choices=("on", "off"), help="Enable/disable experimental passive desktop mouse forwarding")
+    parser.add_argument("--no-autostart", action="store_true", help="Skip installation of automatic wallpaper restoration")
     args = parser.parse_args()
     qdbus = next((shutil.which(name) for name in ("qdbus-qt6", "qdbus6", "qdbus") if shutil.which(name)), None)
     if not qdbus:
@@ -70,6 +72,8 @@ if(d.wallpaperPlugin!==p){
     if int(script_id) < 0:
         raise RuntimeError("KWin could not load the integration script")
     run(qdbus, "org.kde.KWin", "/Scripting/Script" + script_id, "org.kde.kwin.Script.run")
+    if not args.no_autostart:
+        subprocess.run([sys.executable, str(source / "autostart/install.py"), "--if-supported"], check=True)
     print("Installed. Restart Plasma once (or log out/in) to create an alpha-capable desktop:")
     print("  systemctl --user restart plasma-plasmashell.service")
     print("After that, start/stop linux-wallpaperengine normally, including from a GUI.")

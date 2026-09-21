@@ -87,3 +87,24 @@ g++ -std=c++20 -Wall -Wextra -Werror -Isrc kde/tests/mouse-bridge.cpp \
 dbus-run-session -- /tmp/lwe-mouse-bridge-test
 dbus-run-session -- python3 kde/tests/mouse-transport.py /tmp/lwe-mouse-bridge-test
 ```
+
+## Automatic wallpaper restoration
+
+The installer also enables the per-user wallpaper restoration service when a
+KDE Wayland/systemd session and `kscreen-doctor` are available. `build.sh` sets up
+the same service after a successful build. Both accept `--no-autostart` to skip
+setup; this does not disable an existing service.
+
+The tracker watches frontend and Plasma configuration changes using inotify.
+It performs no periodic process scans, writes state only when commands change,
+and takes one final snapshot when the user session stops. The initial login
+restore waits up to 90 seconds for screens and skips already running wallpapers.
+Saved selections survive renderer exits, so a manually stopped wallpaper is
+still remembered for the next login.
+
+For an existing build, run `python3 kde/autostart/install.py --binary
+"$PWD/build/output/linux-wallpaperengine"` from the source directory. To disable
+restoration and stop the tracker, run
+`systemctl --user disable --now linux-wallpaperengine-restore.service`.
+This also stops wallpaper processes launched by the service. Reinstalling does
+not restart an active tracker; updated code is used on the next login.
