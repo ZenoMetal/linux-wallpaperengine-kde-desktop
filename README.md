@@ -60,15 +60,58 @@ See [the retained upstream README](README.upstream.md) for build dependencies an
 
 ## Build and install
 
-Clone this fork with its submodules, then build it using the upstream instructions. For an existing checkout:
+Clone the fork and run the build script **as your normal user**:
 
 ```sh
-git submodule update --init --recursive
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target linux-wallpaperengine -j2
+git clone https://github.com/ZenoMetal/linux-wallpaperengine-kde-desktop.git
+cd linux-wallpaperengine-kde-desktop
+./build.sh
 ```
 
-The build includes the integration files in `build/output/kde/`.
+For an existing checkout, run `git pull --ff-only` and then `./build.sh` again.
+
+The script automatically:
+
+1. Detects the Linux distribution through `os-release`, including related distributions identified by `ID_LIKE`.
+2. Checks installed dependency packages and installs missing build and runtime dependencies with the distribution's package manager.
+3. Initializes the pinned Git submodules recursively.
+4. Configures a **Release** build with CMake. CMake downloads the Chromium Embedded Framework (CEF) files required by the renderer.
+5. Builds `linux-wallpaperengine` and the bundled KDE integration files using two parallel jobs by default.
+6. Checks that the built executable starts, then creates **`/usr/local/bin/linux-wallpaperengine`** as a symlink to **`build/output/linux-wallpaperengine`** in this checkout.
+
+It requests `sudo` only for package installation or a command-link directory that your user cannot write to. Confirm the package manager's transaction when prompted, or pass `--yes` to accept those confirmations automatically. The compilation itself runs without root privileges.
+
+| Distribution family | Package manager |
+| --- | --- |
+| Debian, Ubuntu and derivatives | `apt-get` |
+| Fedora, Nobara and related RPM distributions | `dnf` / `dnf5` |
+| Arch Linux and derivatives | `pacman` |
+| openSUSE | `zypper` |
+| Void Linux with glibc | `xbps-install` |
+
+These are dependency recipes, not a guarantee that every release provides a sufficiently recent compiler or KDE version. Packages must be available in your enabled repositories; the script does not add third-party repositories or force package removals. Fedora/openSUSE library requirements use RPM capabilities so the package manager can use the available FFmpeg and other library providers.
+
+On Arch, installing missing dependencies uses `pacman -Syu --needed`, which also upgrades the system to avoid a partial upgrade. The transaction remains interactive unless you explicitly pass `--yes`.
+
+The script supports glibc-based Linux on x86_64 and aarch64. Alpine/musl and host package installation on image-based systems such as SteamOS or Fedora Atomic are not supported. An unsupported distribution can use `--skip-deps` with a manually prepared toolchain. Building the renderer does not upgrade Plasma; the KDE integration still requires the KDE/Wayland versions listed above.
+
+Useful options:
+
+```sh
+./build.sh --dry-run                  # Inspect the plan without making changes
+./build.sh --yes                      # Accept package-manager confirmations
+./build.sh --jobs 4                   # Choose the number of parallel build jobs
+./build.sh --skip-deps                # Use already installed dependencies
+./build.sh --no-link                  # Build without creating a command symlink
+./build.sh --bin-dir "$HOME/.local/bin" # Use a user-owned command directory
+./build.sh --help
+```
+
+Keep the checkout and the complete `build/output/` directory in place: the symlink points there, and the executable needs its adjacent libraries and CEF resources. Rerunning the script updates an existing symlink after a successful build; it refuses to overwrite a regular file or directory at the command path. A failed build does not replace the existing command link.
+
+### Enable the KDE desktop integration
+
+The build places the integration in `build/output/kde/`. Activate it in your logged-in KDE session using the steps below. The build script leaves your current desktop configuration in place. The integration installer needs Python 3, Qt 6 `qdbus` and `kwriteconfig6`.
 
 List Plasma desktops and note the ID belonging to the screen you want to configure:
 
@@ -129,6 +172,7 @@ The original wallpaper plugin and its retained settings will be selected again. 
 | Mouse input | Receive copied pointer movement and button states over D-Bus, convert coordinates, preserve short clicks, and release stale button states. |
 | Installer | Install user-local packages, enable the KWin script, preserve previous wallpaper settings, toggle mouse forwarding, and support restoration. |
 | CMake | Copy integration assets into the build output, including subsequent updates. |
+| Build script | Detect the distribution, install missing dependencies, initialize submodules, build, check executable startup, and create the command symlink. |
 | Regression tests | Cover stacking, screen matching, renderer lifecycle, passive desktop input, D-Bus transport, short clicks, and timeout releases. |
 
 ## Upstream and license
