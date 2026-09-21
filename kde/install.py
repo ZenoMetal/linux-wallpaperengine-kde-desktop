@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--desktop", type=int, help="Plasma containment ID (see --list)")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--restore", action="store_true", help="Restore the saved wallpaper type")
+    parser.add_argument("--mouse-interaction", choices=("on", "off"), help="Enable/disable experimental passive desktop mouse forwarding")
     args = parser.parse_args()
     qdbus = next((shutil.which(name) for name in ("qdbus-qt6", "qdbus6", "qdbus") if shutil.which(name)), None)
     if not qdbus:
@@ -62,6 +63,8 @@ if(d.wallpaperPlugin!==p){
   d.writeConfig("FallbackImage",image);
 }
 '''))
+    if args.mouse_interaction is not None:
+        print(plasma(prefix + 'd.currentConfigGroup=["Wallpaper",p,"General"];d.writeConfig("MouseRelayEnabled",' + str(args.mouse_interaction == "on").lower() + ');'))
     run(qdbus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.unloadScript", KWIN)
     script_id = run(qdbus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.loadScript", str(kwin / "contents/code/main.js"), KWIN)
     if int(script_id) < 0:

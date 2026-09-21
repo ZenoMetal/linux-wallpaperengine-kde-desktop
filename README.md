@@ -83,7 +83,7 @@ If you use a separate graphical frontend, point it at this fork's executable. Th
 
 ## Behavior and limitations
 
-- **Direct wallpaper mouse interaction and mouse-driven parallax are disabled in KDE desktop mode.** The desktop receives those input events instead. Wayland does not broadcast Plasma's pointer events to background clients.
+- **Experimental mouse forwarding is opt-in.** Run `python3 kde/install.py --desktop ID --mouse-interaction on` and restart Plasma after installing this version. Passive Qt Quick observers copy desktop pointer movement and left/right button states to the renderer over the user session D-Bus. Plasma keeps processing the original events. Movement over other application windows, wheel scrolling, keyboard input and touch gestures are not forwarded. Use `--mouse-interaction off` to disable it. A click on a desktop icon is also seen by the wallpaper; this is intentional for this trial. Only wallpapers with built-in mouse effects will visibly react.
 - The Plasma integration remains selected across sessions. Only explicitly configured screens use it.
 - Solid-color and image backgrounds are saved as static fallbacks. Other previous wallpaper plugins use a black fallback; they are not executed inside this integration. Directory-based image wallpapers may require an explicit image file in `FallbackImage`.
 - Other desktop environments and window-preview mode retain their previous behavior. Set `LWE_KDE_DESKTOP=0` before a launch to opt out of the KDE-specific renderer behavior.

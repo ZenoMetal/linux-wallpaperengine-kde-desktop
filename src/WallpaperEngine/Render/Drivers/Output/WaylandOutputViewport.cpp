@@ -97,6 +97,7 @@ static void surfaceFrameCallback (void* data, struct wl_callback* cb, uint32_t t
     wl_callback_destroy (cb);
 
     viewport->frameCallback = nullptr;
+    viewport->getDriver ()->prepareMouseFrame (*viewport);
     viewport->rendering = true;
     viewport->getDriver ()->getApp ().update (viewport);
     viewport->rendering = false;

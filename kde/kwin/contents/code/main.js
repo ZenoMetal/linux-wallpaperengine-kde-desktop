@@ -17,7 +17,7 @@ function synchronize() {
             workspace.constrain(wallpaper, desktop);
         }
     }
-    const state = JSON.stringify(wallpapers.map(w => ({x:w.frameGeometry.x, y:w.frameGeometry.y})));
+    const state = JSON.stringify(wallpapers.map(w => ({x:w.frameGeometry.x, y:w.frameGeometry.y, pid:w.pid})));
     if (state === lastState) return;
     lastState = state;
     // Only touch desktops explicitly configured for this integration. This also
@@ -29,6 +29,9 @@ function synchronize() {
         + 'var active=positions.some(function(p){return p.x===g.x && p.y===g.y;});'
         + 'd.currentConfigGroup=["Wallpaper",plugin,"General"];'
         + 'd.writeConfig("Active",active);'
+        + 'var targets=positions.filter(function(p){return p.x===g.x && p.y===g.y && p.pid>0;})'
+        + '.map(function(p){return {x:p.x,y:p.y,service:"org.linuxwallpaperengine.Mouse.p"+p.pid};});'
+        + 'd.writeConfig("InputTargets",JSON.stringify(targets));'
         + '});';
     callDBus("org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell", "evaluateScript", script);
 }

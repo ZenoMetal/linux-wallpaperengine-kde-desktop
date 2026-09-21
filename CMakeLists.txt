@@ -201,6 +201,8 @@ if(WAYLAND_SUPPORT_FOUND)
         src/WallpaperEngine/Render/Drivers/Output/WaylandOutput.h
         src/WallpaperEngine/Render/Drivers/Output/WaylandOutputViewport.cpp
         src/WallpaperEngine/Render/Drivers/Output/WaylandOutputViewport.h
+        src/WallpaperEngine/Input/Drivers/KdeMouseBridge.cpp
+        src/WallpaperEngine/Input/Drivers/KdeMouseBridge.h
         src/WallpaperEngine/Input/Drivers/WaylandMouseInput.cpp
         src/WallpaperEngine/Input/Drivers/WaylandMouseInput.h
         ${WAYLAND_OUTPUT_DIR}/xdg-shell-protocol.c
