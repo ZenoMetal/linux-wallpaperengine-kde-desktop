@@ -704,3 +704,9 @@ install(DIRECTORY ${TARGET_OUTPUT_DIRECTORY}/ DESTINATION .
     PATTERN "linux-wallpaperengine" EXCLUDE
     PATTERN "liblinux-wallpaperengine-lib.so" EXCLUDE
 )
+
+# Optional, user-installed KDE desktop integration (no native Plasma plugin).
+add_custom_target(kde-desktop-assets
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/kde" "${TARGET_OUTPUT_DIRECTORY}/kde")
+add_dependencies(linux-wallpaperengine kde-desktop-assets)

@@ -180,6 +180,12 @@ void WaylandOutputViewport::setupLS () {
 	    break;
     }
 
+    // KWin's BOTTOM layer is above Plasma's icons. The companion KWin script
+    // constrains this BACKGROUND surface below the transparent Plasma desktop.
+    if (m_driver->usesKdeDesktop ()) {
+        wlrLayer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
+    }
+
     layerSurface = zwlr_layer_shell_v1_get_layer_surface (
 	m_driver->getWaylandContext ()->layerShell, surface, output, wlrLayer, "linux-wallpaperengine"
     );
@@ -189,7 +195,7 @@ void WaylandOutputViewport::setupLS () {
     }
 
     wl_region* region = wl_compositor_create_region (m_driver->getWaylandContext ()->compositor);
-    if (m_driver->getApp ().getContext ().settings.mouse.enabled) {
+    if (m_driver->getApp ().getContext ().settings.mouse.enabled && !m_driver->usesKdeDesktop ()) {
 	wl_region_add (region, 0, 0, INT32_MAX, INT32_MAX);
     }
 
