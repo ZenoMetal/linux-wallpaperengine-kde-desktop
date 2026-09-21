@@ -1,6 +1,6 @@
 # Linux Wallpaper Engine — KDE Plasma Desktop Integration
 
-A KDE Plasma / Wayland fork of [Almamu/linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) that keeps the desktop usable while animated wallpapers are running.
+A KDE Plasma / Wayland fork of [Almamu/linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine) that keeps the desktop usable with animated wallpapers and mouse-driven effects.
 
 ## 100% AI-generated fork changes
 
@@ -17,10 +17,11 @@ With this fork's KDE integration installed, Plasma continues to provide the norm
 - Desktop icons and widgets remain visible.
 - Right-click menus, icon interaction, dragging, and selection rectangles continue to work.
 - Panels remain usable.
+- With mouse forwarding enabled, wallpapers can react to pointer movement and left/right clicks while the desktop remains interactive.
 - Existing command-line launches and graphical frontends that invoke this executable can still be used.
 - Stopping the renderer returns the configured screen to its saved static fallback background.
 
-**The integration must be installed once for each desired screen. Simply building the executable is not enough.**
+**After installing the bundled KDE integration (see [Build and install](#build-and-install)), select "Linux Wallpaper Engine (Desktop Integration)" as the wallpaper type in System Settings → Wallpaper, or right-click the desktop → Desktop and Wallpaper Settings. Select this type on each screen where you want to use the integration.**
 
 ## Why it works
 
@@ -31,6 +32,22 @@ This fix combines three changes; changing the wallpaper's mouse handling alone w
 3. **Keep Plasma above the wallpaper.** A small QML wallpaper plugin makes only Plasma's background transparent. A KWin script uses `workspace.constrain()` to keep renderer surfaces below the Plasma desktop. Icons, widgets, menus, and selection rectangles are still drawn and handled by Plasma.
 
 The KWin script also tracks renderer windows by screen and toggles a static fallback when no matching renderer remains. It responds to window removal rather than depending on a clean renderer shutdown. The rendering continues through the existing GPU path: there is no CPU framebuffer-copy bridge and no native module loaded into Plasma.
+
+## Mouse interaction
+
+**Mouse interaction works alongside normal KDE desktop interaction.** Enable it when installing or updating the integration:
+
+```sh
+python3 build/output/kde/install.py --desktop DESKTOP_ID --mouse-interaction on
+```
+
+The wallpaper must contain its own mouse-driven effects, such as parallax or reactions to clicks.
+
+The Plasma plugin uses passive Qt Quick pointer observers to copy desktop mouse movement and left/right button states. It sends those copies over the local session D-Bus to the wallpaper renderer assigned to that screen. The renderer converts the coordinates to its own pixel and coordinate system and feeds them into its existing mouse-input handling.
+
+Plasma continues to receive and process the original events: the wallpaper never grabs the pointer, and its Wayland input region stays empty. This lets wallpaper effects respond while desktop icons, right-click menus and selection rectangles keep working. Input is tracked separately for each screen, short clicks are preserved across render frames, and missing button releases time out to prevent stuck presses.
+
+Forwarding is currently opt-in. To disable it, use the same installer command with `--mouse-interaction off`. After first installing or upgrading the plugin, restart Plasma as described below; later on/off changes do not require a restart.
 
 ## Requirements
 
@@ -62,8 +79,10 @@ python3 build/output/kde/install.py --list
 Replace `DESKTOP_ID` below with that numeric ID:
 
 ```sh
-python3 build/output/kde/install.py --desktop DESKTOP_ID
+python3 build/output/kde/install.py --desktop DESKTOP_ID --mouse-interaction on
 ```
+
+This installs the KDE packages, enables the KWin script, selects the integration wallpaper type for that desktop, and enables mouse forwarding. The selected type is shown as **Linux Wallpaper Engine (Desktop Integration)** in Plasma's wallpaper settings.
 
 Repeat for any additional screens, then restart Plasma **once**, or log out and back in:
 
@@ -83,7 +102,7 @@ If you use a separate graphical frontend, point it at this fork's executable. Th
 
 ## Behavior and limitations
 
-- **Experimental mouse forwarding is opt-in.** Run `python3 kde/install.py --desktop ID --mouse-interaction on` and restart Plasma after installing this version. Passive Qt Quick observers copy desktop pointer movement and left/right button states to the renderer over the user session D-Bus. Plasma keeps processing the original events. Movement over other application windows, wheel scrolling, keyboard input and touch gestures are not forwarded. Use `--mouse-interaction off` to disable it. A click on a desktop icon is also seen by the wallpaper; this is intentional for this trial. Only wallpapers with built-in mouse effects will visibly react.
+- Mouse forwarding observes the desktop only. Movement and clicks over other application windows, panel controls or context-menu contents are not forwarded; neither are wheel scrolling, keyboard input or touch gestures. Desktop icon clicks and selection drags are also seen by the wallpaper. Only wallpapers with built-in mouse effects will visibly react.
 - The Plasma integration remains selected across sessions. Only explicitly configured screens use it.
 - Solid-color and image backgrounds are saved as static fallbacks. Other previous wallpaper plugins use a black fallback; they are not executed inside this integration. Directory-based image wallpapers may require an explicit image file in `FallbackImage`.
 - Other desktop environments and window-preview mode retain their previous behavior. Set `LWE_KDE_DESKTOP=0` before a launch to opt out of the KDE-specific renderer behavior.
@@ -105,27 +124,12 @@ The original wallpaper plugin and its retained settings will be selected again. 
 | --- | --- |
 | Wayland driver | Detect the KDE desktop session, with an explicit opt-out. |
 | Wayland output viewport | Select the background layer and leave the pointer input region empty in KDE mode. |
-| Plasma wallpaper package | Provide a transparent desktop background with a saved static fallback. |
-| KWin script | Constrain renderer windows below Plasma and update fallback visibility per screen. |
-| Installer | Install user-local packages, enable the KWin script, preserve previous wallpaper settings, and support restoration. |
+| Plasma wallpaper package | Provide a transparent desktop background with a saved static fallback and passive mouse observers. |
+| KWin script | Constrain renderer windows below Plasma, update fallback visibility, and assign mouse receivers per screen. |
+| Mouse input | Receive copied pointer movement and button states over D-Bus, convert coordinates, preserve short clicks, and release stale button states. |
+| Installer | Install user-local packages, enable the KWin script, preserve previous wallpaper settings, toggle mouse forwarding, and support restoration. |
 | CMake | Copy integration assets into the build output, including subsequent updates. |
-| Regression tests | Check stacking, screen matching, window removal, multiple renderers, and recovery after a failed Plasma D-Bus call. |
-
-## Validation
-
-- Release build completed successfully on the tested machine.
-- Wayland protocol inspection confirmed the background layer and an empty input region.
-- The user manually confirmed that right-click, desktop selection rectangles, and icon interaction work with the animated wallpaper running.
-- Normal stop/start behavior and fallback restoration were checked live.
-- JavaScript regression tests cover removal/crash handling and Plasma reconnection. A separate live forced-exit test was inconclusive because wallpapers were being changed through the frontend at the same time.
-
-Run the regression tests with:
-
-```sh
-node kde/tests/stacking.test.js
-```
-
-These checks are not a claim of human code review or exhaustive compatibility testing.
+| Regression tests | Cover stacking, screen matching, renderer lifecycle, passive desktop input, D-Bus transport, short clicks, and timeout releases. |
 
 ## Upstream and license
 
