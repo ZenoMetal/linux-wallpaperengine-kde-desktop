@@ -98,6 +98,104 @@ class AutostartTests(unittest.TestCase):
             self.assertEqual((root / '.local/libexec/linux-wallpaperengine/restore-wallpapers.py').read_bytes(),
                              (SOURCE / 'restore-wallpapers.py').read_bytes())
 
+    def test_frontend_autostart_ownership_and_disabled_overrides(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            user, system = root / 'user', root / 'system'
+            for base in (user, system):
+                (base / 'autostart').mkdir(parents=True)
+            frontend = user / 'Linux Wallpaper Engine'
+            frontend.mkdir()
+            (frontend / 'active-wallpapers.json').write_text(json.dumps({
+                'activeWallpapers': {'DP-1': {}}, 'activePlaylists': {'DP-2': {}}}))
+            entry = '[Desktop Entry]\nType=Application\nExec=linux-wallpaper-engine\n'
+            (system / 'autostart/Linux Wallpaper Engine.desktop').write_text(entry)
+            with patch.dict(os.environ, {'XDG_CONFIG_DIRS': str(system), 'XDG_CURRENT_DESKTOP': 'KDE'}), \
+                    patch.object(restore.shutil, 'which', return_value='/usr/bin/linux-wallpaper-engine'):
+                self.assertEqual(restore.frontend_autostart_screens(user), {'DP-1', 'DP-2'})
+                override = user / 'autostart/Linux Wallpaper Engine.desktop'
+                for extra in ('Hidden=true', 'OnlyShowIn=GNOME;', 'NotShowIn=KDE;',
+                              'X-GNOME-Autostart-enabled=false', 'Exec=unrelated-app'):
+                    override.write_text(entry + extra + '\n')
+                    self.assertEqual(restore.frontend_autostart_screens(user), set(), extra)
+                override.write_text(entry)
+                with patch.object(restore.shutil, 'which', return_value=None):
+                    self.assertEqual(restore.frontend_autostart_screens(user), set())
+                (frontend / 'settings.json').write_text('{"windowMode":true}')
+                self.assertEqual(restore.frontend_autostart_screens(user), set())
+                (frontend / 'settings.json').unlink()
+                (frontend / 'active-wallpapers.json').write_text('broken json')
+                self.assertEqual(restore.frontend_autostart_screens(user), set())
+
+    def test_delayed_frontend_and_failed_frontend_startup(self):
+        # Run the real event loop and inotify. Only renderer processes and screen
+        # discovery are simulated, so no desktop session is needed by the test.
+        for frontend_starts in (True, False):
+            with self.subTest(frontend_starts=frontend_starts), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                config = root / 'config'
+                frontend = config / 'Linux Wallpaper Engine'
+                frontend.mkdir(parents=True)
+                active, launches = root / 'active.json', root / 'launches.json'
+                active.write_text('[]')
+                launches.write_text('[]')
+                a, b = record('DP-1', 'a'), record('DP-2', 'b')
+                fixture = root / 'fixture.py'
+                fixture.write_text("""import importlib.util, json
+from pathlib import Path
+from types import SimpleNamespace
+s=importlib.util.spec_from_file_location('r', SOURCE)
+m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
+active, launches = Path(ACTIVE), Path(LAUNCHES)
+m.running=lambda:json.loads(active.read_text())
+m.connected=lambda:{'DP-1','DP-2'}
+m.frontend_autostart_screens=lambda:{'DP-1'}
+m.FRONTEND_STARTUP_GRACE=1.5
+m.time.sleep=lambda _:None
+def spawn(record):
+ current=json.loads(active.read_text()); current.append(record)
+ active.write_text(json.dumps(current))
+ started=json.loads(launches.read_text()); started.extend(record['screens'])
+ launches.write_text(json.dumps(started))
+ return SimpleNamespace(poll=lambda:None)
+m.spawn=spawn
+m.monitor(RECORDS)
+""".replace('SOURCE', repr(str(SOURCE / 'restore-wallpapers.py')))
+                    .replace('ACTIVE', repr(str(active))).replace('LAUNCHES', repr(str(launches)))
+                    .replace('RECORDS', repr([a, b])))
+                log = root / 'log'
+                with log.open('w') as output:
+                    process = subprocess.Popen([sys.executable, str(fixture)],
+                        env={**os.environ, 'XDG_CONFIG_HOME': str(config), 'XDG_STATE_HOME': str(root / 'state')},
+                        stdout=output, stderr=subprocess.STDOUT)
+                    try:
+                        def wait_for(message):
+                            deadline = time.monotonic() + 5
+                            while time.monotonic() < deadline:
+                                if message in log.read_text(): return
+                                if process.poll() is not None: self.fail(log.read_text())
+                                time.sleep(0.02)
+                            self.fail('Timed out: ' + log.read_text())
+                        wait_for('Restored wallpaper on DP-2')
+                        self.assertEqual(json.loads(launches.read_text()), ['DP-2'])
+                        if frontend_starts:
+                            active.write_text(json.dumps([a, b]))
+                            (frontend / 'active-wallpapers.json').write_text('{}')
+                            wait_for('Frontend restored DP-1; no duplicate launch.')
+                            time.sleep(1.6)  # beyond the fallback deadline
+                            self.assertEqual(json.loads(launches.read_text()), ['DP-2'])
+                            self.assertNotIn('timed out', log.read_text())
+                        else:
+                            wait_for('Restored wallpaper on DP-1')
+                            self.assertEqual(json.loads(launches.read_text()), ['DP-2', 'DP-1'])
+                            self.assertIn('Frontend startup timed out', log.read_text())
+                        process.send_signal(signal.SIGTERM)
+                        self.assertEqual(process.wait(timeout=5), 0, log.read_text())
+                    finally:
+                        if process.poll() is None:
+                            process.kill()
+                            process.wait()
+
     def test_event_notifications_idle_and_shutdown(self):
         with tempfile.TemporaryDirectory(prefix='lwe events ') as temp:
             root = Path(temp)

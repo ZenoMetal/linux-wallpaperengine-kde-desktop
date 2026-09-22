@@ -3,11 +3,14 @@
 """Remember running desktop wallpapers and restore them once per KDE login."""
 import argparse
 import ctypes
+import configparser
 import fcntl
 import json
 import os
 from pathlib import Path
 import signal
+import shlex
+import shutil
 import selectors
 import socket
 import struct
@@ -17,6 +20,7 @@ import time
 BINARY = Path('/usr/local/bin/linux-wallpaperengine')
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'linux-wallpaperengine/last-wallpapers.json'
 STOP = False
+FRONTEND_STARTUP_GRACE = 30
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 
 
@@ -105,6 +109,47 @@ def connected():
         return set()
 
 
+def frontend_autostart_screens(config=CONFIG):
+    """Screens the optional Electron frontend will restore during this login.
+
+    Its startup can replace existing renderers, so those screens must have only
+    one owner. The desktop entry (not the frontend's unused restore preference)
+    determines whether it is scheduled to start. XDG user overrides win.
+    """
+    roots = [config, *(Path(p) for p in os.environ.get('XDG_CONFIG_DIRS', '/etc/xdg').split(':') if p)]
+    entry = next((r / 'autostart/Linux Wallpaper Engine.desktop' for r in roots
+                  if (r / 'autostart/Linux Wallpaper Engine.desktop').exists()), None)
+    if entry is None:
+        return set()
+    try:
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        parser.read(entry)
+        desktop = parser['Desktop Entry']
+        if (desktop.get('Type') != 'Application' or desktop.getboolean('Hidden', fallback=False)
+                or not desktop.getboolean('X-GNOME-Autostart-enabled', fallback=True)):
+            return set()
+        session = set(os.environ.get('XDG_CURRENT_DESKTOP', '').split(':'))
+        only = set(filter(None, desktop.get('OnlyShowIn', '').split(';')))
+        excluded = set(filter(None, desktop.get('NotShowIn', '').split(';')))
+        if (only and not session.intersection(only)) or session.intersection(excluded):
+            return set()
+        command = shlex.split(desktop.get('Exec', ''))
+        if not command or Path(command[0]).name != 'linux-wallpaper-engine':
+            return set()
+        if not shutil.which(desktop.get('TryExec', command[0])):
+            return set()
+        frontend = config / 'Linux Wallpaper Engine'
+        settings = frontend / 'settings.json'
+        if settings.exists() and json.loads(settings.read_text()).get('windowMode'):
+            return set()
+        data = json.loads((frontend / 'active-wallpapers.json').read_text())
+        return {screen for key in ('activeWallpapers', 'activePlaylists')
+                for screen in data.get(key, {}) if isinstance(screen, str) and screen != 'default'}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, configparser.Error):
+        # Missing/broken frontend configuration must not disable restoration.
+        return set()
+
+
 def spawn(record):
     # Use the maintained symlink, and argv directly: never execute a shell command.
     cwd = record['cwd'] if Path(record['cwd']).is_dir() else str(BINARY.resolve().parent)
@@ -178,8 +223,8 @@ def capture(saved, force=False):
     return updated
 
 
-def restore_pending(saved, handled, attempts, children):
-    pending = [r for r in saved if not set(r['screens']).intersection(handled)
+def restore_pending(saved, handled, attempts, children, deferred=frozenset()):
+    pending = [r for r in saved if not set(r['screens']).intersection(handled | set(deferred))
                and attempts.get(tuple(r['screens']), 0) < 3]
     if not pending:
         return False
@@ -205,7 +250,7 @@ def restore_pending(saved, handled, attempts, children):
         except OSError as error:
             log(f'Could not restore {key}: {error}')
     return any(not set(r['screens']).intersection(handled)
-               and attempts.get(tuple(r['screens']), 0) < 3 for r in saved)
+               and attempts.get(tuple(r['screens']), 0) < 3 for r in pending)
 
 
 def monitor(saved):
@@ -227,6 +272,10 @@ def monitor(saved):
         handled = {s for r in running() for s in r['screens']}
         if handled:
             log('Already running; no duplicate launch: ' + ', '.join(sorted(handled)))
+        deferred = frontend_autostart_screens() & {s for r in saved for s in r['screens']} - handled
+        frontend_deadline = time.monotonic() + FRONTEND_STARTUP_GRACE if deferred else None
+        if deferred:
+            log('Waiting for frontend startup on ' + ', '.join(sorted(deferred)))
         deadline = time.monotonic() + 90
         retry = time.monotonic()
         debounce = None
@@ -234,13 +283,32 @@ def monitor(saved):
         log('Event-driven wallpaper tracking started (no periodic process scans).')
         while not STOP:
             now = time.monotonic()
+            if frontend_deadline is not None and now >= frontend_deadline:
+                # Recheck once at the deadline even if the frontend did not write
+                # its configuration. restore_pending also checks before spawning.
+                handled.update(s for r in running() for s in r['screens'])
+                missing = deferred - handled
+                if missing:
+                    log('Frontend startup timed out; restoring ' + ', '.join(sorted(missing)))
+                deferred.clear()
+                frontend_deadline = None
+                retry = now
             if retry is not None and now >= retry:
-                pending = restore_pending(saved, handled, attempts, children)
+                pending = restore_pending(saved, handled, attempts, children, deferred)
                 retry = now + 10 if pending and now + 10 < deadline else None
             if debounce is not None and now >= debounce:
                 saved = capture(saved)
+                if deferred:
+                    active = {s for r in running() for s in r['screens']}
+                    ready = deferred & active
+                    handled.update(ready)
+                    deferred.difference_update(ready)
+                    if ready:
+                        log('Frontend restored ' + ', '.join(sorted(ready)) + '; no duplicate launch.')
+                    if not deferred:
+                        frontend_deadline = None
                 debounce = None
-            deadlines = [t for t in (retry, debounce) if t is not None]
+            deadlines = [t for t in (retry, debounce, frontend_deadline) if t is not None]
             timeout = max(0, min(deadlines) - time.monotonic()) if deadlines else None
             if STOP:
                 break
